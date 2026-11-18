@@ -3,7 +3,9 @@
 Offline speech-to-text for Android. Speak, and it writes your words — no internet, no extra device.
 
 - Languages: Auto-detect, English, বাংলা (Bengali), हिंदी (Hindi)
-- Engine: [whisper.cpp](https://github.com/ggml-org/whisper.cpp) with the multilingual `base` model, packed inside the app
+- Engine: [whisper.cpp](https://github.com/ggml-org/whisper.cpp), fully on-device
+  - Auto / English / Hindi: multilingual Whisper `base`
+  - Bengali: [anuragshas/whisper-small-bn](https://huggingface.co/anuragshas/whisper-small-bn) (Whisper small fine-tuned on Bengali), converted to ggml q8_0 during the build
 - Live mode: words appear while you speak, then a careful final pass polishes them
 - Copy, share, edit, and a saved history — everything stays on the phone
 

@@ -13,7 +13,7 @@ import kotlin.math.sqrt
  * step() must always run on the same single background thread.
  */
 class LiveTranscriber(
-    private val whisper: Whisper,
+    private val models: Models,
     private val recorder: Recorder,
     private val threads: Int,
     private val requestedLang: String,
@@ -56,7 +56,8 @@ class LiveTranscriber(
 
     private fun transcribe(audio: FloatArray): String {
         if (isSilent(audio)) return "" // avoids made-up words on silence
-        val r = whisper.transcribe(audio, lang, threads, fast = true)
+        val w = models.forLanguage(lang) ?: return ""
+        val r = w.transcribe(audio, lang, threads, fast = true)
         // In Auto mode, stick to the first detected language so the preview doesn't flip.
         if (requestedLang == "auto" && lang == "auto" && audio.size >= 3 * RATE && r.language.isNotEmpty()) {
             lang = r.language

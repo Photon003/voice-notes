@@ -49,7 +49,7 @@ Java_com_photon_voicenotes_Whisper_nativeFree(JNIEnv *, jclass, jlong ctx) {
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_photon_voicenotes_Whisper_nativeTranscribe(JNIEnv *env, jclass, jlong ctxPtr,
                                                     jfloatArray audio, jstring lang, jint threads,
-                                                    jboolean fast) {
+                                                    jboolean fast, jboolean noTimestamps) {
     auto *ctx = reinterpret_cast<whisper_context *>(ctxPtr);
 
     const char *l = env->GetStringUTFChars(lang, nullptr);
@@ -84,6 +84,8 @@ Java_com_photon_voicenotes_Whisper_nativeTranscribe(JNIEnv *env, jclass, jlong c
     params.detect_language = false;
     params.n_threads = threads;
     params.no_context = true;
+    // Fine-tuned models are usually trained without timestamps.
+    if (noTimestamps) params.no_timestamps = true;
 
     jfloat *samples = env->GetFloatArrayElements(audio, nullptr);
     const int rc = whisper_full(ctx, params, samples, n);

@@ -38,7 +38,8 @@ class MainActivity : AppCompatActivity() {
     private val ui = Handler(Looper.getMainLooper())
     private val recorder = Recorder()
     private lateinit var store: NotesStore
-    private var whisper: Whisper? = null
+    private lateinit var models: Models
+    private var engineOk = false
     private var state = State.LOADING
     private var recordStart = 0L
     private var currentNote: Note? = null
@@ -114,12 +115,13 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
+        models = Models(assets)
         setState(State.LOADING)
         worker.execute {
-            val w = Whisper.load(assets, MODEL_PATH)
+            val ok = models.forLanguage("en") != null
             ui.post {
-                whisper = w
-                setState(if (w != null) State.IDLE else State.FAILED)
+                engineOk = ok
+                setState(if (ok) State.IDLE else State.FAILED)
             }
         }
     }
@@ -157,9 +159,16 @@ class MainActivity : AppCompatActivity() {
         liveSession = liveSwitch.isChecked
         setState(State.RECORDING)
         ui.post(tick)
-        val w = whisper
-        if (liveSession && w != null) {
-            val l = LiveTranscriber(w, recorder, threads, selectedLanguage()) { text ->
+        val lang = selectedLanguage()
+        if (lang == "bn" && !models.isLoaded("bn")) {
+            status.text = "Loading Bengali engine (first time only)…"
+            worker.execute {
+                models.forLanguage("bn")
+                ui.post { if (state == State.RECORDING) setState(State.RECORDING) }
+            }
+        }
+        if (liveSession && engineOk) {
+            val l = LiveTranscriber(models, recorder, threads, lang) { text ->
                 ui.post { if (live != null && state == State.RECORDING) showLive(text) }
             }
             live = l
@@ -204,12 +213,19 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val lang = selectedLanguage()
-        val w = whisper ?: return
+        if (!engineOk) return
         setState(State.WORKING)
         val seconds = audio.size / Recorder.RATE.toFloat()
         val started = SystemClock.elapsedRealtime()
         worker.execute {
-            val r = w.transcribe(audio, lang, threads)
+            var r = models.forLanguage(lang)?.transcribe(audio, lang, threads)
+                ?: Whisper.Result("", "")
+            // Auto mode heard Bengali: redo it with the Bengali-trained model.
+            if (lang == "auto" && r.language == "bn") {
+                models.forLanguage("bn")?.transcribe(audio, "bn", threads)?.let {
+                    if (it.text.isNotBlank()) r = Whisper.Result(it.text, "bn")
+                }
+            }
             val took = (SystemClock.elapsedRealtime() - started) / 1000f
             ui.post {
                 setState(State.IDLE)
@@ -318,12 +334,11 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         stopLive()
         if (state == State.RECORDING) recorder.stop()
-        worker.execute { whisper?.release() }
+        worker.execute { models.releaseAll() }
         worker.shutdown()
     }
 
     companion object {
-        const val MODEL_PATH = "models/ggml-base.bin"
         const val MAX_SECONDS = 600
         const val LIVE_GAP_MS = 300L
     }
