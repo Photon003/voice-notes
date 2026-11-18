@@ -48,15 +48,33 @@ Java_com_photon_voicenotes_Whisper_nativeFree(JNIEnv *, jclass, jlong ctx) {
 // Returns the text as UTF-8 bytes (safe for Bengali / Hindi / any script).
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_photon_voicenotes_Whisper_nativeTranscribe(JNIEnv *env, jclass, jlong ctxPtr,
-                                                    jfloatArray audio, jstring lang, jint threads) {
+                                                    jfloatArray audio, jstring lang, jint threads,
+                                                    jboolean fast) {
     auto *ctx = reinterpret_cast<whisper_context *>(ctxPtr);
 
     const char *l = env->GetStringUTFChars(lang, nullptr);
     std::string language(l);
     env->ReleaseStringUTFChars(lang, l);
 
-    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
-    params.beam_search.beam_size = 5;
+    const jsize n = env->GetArrayLength(audio);
+
+    whisper_full_params params;
+    if (fast) {
+        // Live preview: quick and rough. Only look at as much audio as we have
+        // (audio_ctx 1500 = 30 s), single pass, no retries.
+        params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+        int actx = n / 320 + 32;
+        if (actx < 128) actx = 128;
+        if (actx > 1500) actx = 1500;
+        params.audio_ctx = actx;
+        params.single_segment = true;
+        params.no_timestamps = true;
+        params.temperature_inc = 0.0f;
+    } else {
+        // Final pass: careful, same quality as the whisper-cli default.
+        params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
+        params.beam_search.beam_size = 5;
+    }
     params.print_realtime = false;
     params.print_progress = false;
     params.print_timestamps = false;
@@ -67,7 +85,6 @@ Java_com_photon_voicenotes_Whisper_nativeTranscribe(JNIEnv *env, jclass, jlong c
     params.n_threads = threads;
     params.no_context = true;
 
-    const jsize n = env->GetArrayLength(audio);
     jfloat *samples = env->GetFloatArrayElements(audio, nullptr);
     const int rc = whisper_full(ctx, params, samples, n);
     env->ReleaseFloatArrayElements(audio, samples, JNI_ABORT);

@@ -5,16 +5,18 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 
-/** Records the microphone as 16 kHz mono audio, the format whisper expects. */
+/**
+ * Records the microphone as 16 kHz mono audio, the format whisper expects.
+ * The audio can be read while recording is still going (for live mode).
+ */
 class Recorder {
 
-    private val chunks = ArrayList<ShortArray>()
-    @Volatile private var running = false
+    private val lock = Any()
+    private var buffer = ShortArray(RATE * 60)
     @Volatile var sampleCount = 0
         private set
+    @Volatile private var running = false
     private var thread: Thread? = null
-
-    val seconds: Float get() = sampleCount / RATE.toFloat()
 
     @SuppressLint("MissingPermission") // checked by MainActivity before calling
     fun start(): Boolean {
@@ -36,17 +38,17 @@ class Recorder {
             return false
         }
 
-        synchronized(chunks) { chunks.clear() }
-        sampleCount = 0
+        synchronized(lock) { sampleCount = 0 }
         running = true
         record.startRecording()
 
         thread = Thread {
-            val buf = ShortArray(RATE / 10)
+            val chunk = ShortArray(RATE / 10)
             while (running) {
-                val n = record.read(buf, 0, buf.size)
-                if (n > 0) {
-                    synchronized(chunks) { chunks.add(buf.copyOf(n)) }
+                val n = record.read(chunk, 0, chunk.size)
+                if (n > 0) synchronized(lock) {
+                    if (sampleCount + n > buffer.size) buffer = buffer.copyOf(buffer.size * 2)
+                    System.arraycopy(chunk, 0, buffer, sampleCount, n)
                     sampleCount += n
                 }
             }
@@ -56,20 +58,19 @@ class Recorder {
         return true
     }
 
-    /** Stops recording and returns the audio as floats in -1..1. */
+    /** Copy of samples [from, to) as floats in -1..1, safe to call while recording. */
+    fun read(from: Int, to: Int): FloatArray = synchronized(lock) {
+        val end = minOf(to, sampleCount)
+        val start = minOf(maxOf(0, from), end)
+        FloatArray(end - start) { buffer[start + it] / 32768f }
+    }
+
+    /** Stops recording and returns the whole recording. */
     fun stop(): FloatArray {
         running = false
         thread?.join()
         thread = null
-        val out = FloatArray(sampleCount)
-        var i = 0
-        synchronized(chunks) {
-            for (c in chunks) for (s in c) {
-                if (i < out.size) out[i++] = s / 32768f
-            }
-            chunks.clear()
-        }
-        return out
+        return read(0, sampleCount)
     }
 
     companion object {

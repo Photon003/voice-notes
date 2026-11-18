@@ -7,8 +7,9 @@ class Whisper private constructor(private var ctx: Long) {
 
     class Result(val text: String, val language: String)
 
-    fun transcribe(samples: FloatArray, language: String, threads: Int): Result {
-        val bytes = nativeTranscribe(ctx, samples, language, threads)
+    /** fast = quick rough pass for the live preview; false = careful final pass. */
+    fun transcribe(samples: FloatArray, language: String, threads: Int, fast: Boolean = false): Result {
+        val bytes = nativeTranscribe(ctx, samples, language, threads, fast)
         val text = String(bytes, Charsets.UTF_8).trim()
         return Result(text, nativeDetectedLanguage(ctx))
     }
@@ -32,7 +33,7 @@ class Whisper private constructor(private var ctx: Long) {
         @JvmStatic private external fun nativeInit(assets: AssetManager, path: String): Long
         @JvmStatic private external fun nativeFree(ctx: Long)
         @JvmStatic private external fun nativeTranscribe(
-            ctx: Long, samples: FloatArray, language: String, threads: Int
+            ctx: Long, samples: FloatArray, language: String, threads: Int, fast: Boolean
         ): ByteArray
         @JvmStatic private external fun nativeDetectedLanguage(ctx: Long): String
     }

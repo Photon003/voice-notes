@@ -23,6 +23,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
+import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -41,11 +42,14 @@ class MainActivity : AppCompatActivity() {
     private var state = State.LOADING
     private var recordStart = 0L
     private var currentNote: Note? = null
+    private var live: LiveTranscriber? = null
+    private var liveSession = false
 
     private lateinit var status: TextView
     private lateinit var timer: TextView
     private lateinit var recordBtn: MaterialButton
     private lateinit var langGroup: MaterialButtonToggleGroup
+    private lateinit var liveSwitch: MaterialSwitch
     private lateinit var progress: LinearProgressIndicator
     private lateinit var result: EditText
     private lateinit var historyList: ListView
@@ -62,6 +66,7 @@ class MainActivity : AppCompatActivity() {
         timer = findViewById(R.id.timer)
         recordBtn = findViewById(R.id.recordBtn)
         langGroup = findViewById(R.id.langGroup)
+        liveSwitch = findViewById(R.id.liveSwitch)
         progress = findViewById(R.id.progress)
         result = findViewById(R.id.resultText)
         historyList = findViewById(R.id.historyList)
@@ -76,6 +81,8 @@ class MainActivity : AppCompatActivity() {
         langGroup.addOnButtonCheckedListener { _, id, checked ->
             if (checked) prefs.edit().putInt("lang", id).apply()
         }
+        liveSwitch.isChecked = prefs.getBoolean("live", true)
+        liveSwitch.setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("live", on).apply() }
 
         recordBtn.setOnClickListener { onRecordTapped() }
         findViewById<MaterialButton>(R.id.copyBtn).setOnClickListener { copyText() }
@@ -143,9 +150,39 @@ class MainActivity : AppCompatActivity() {
             toast("Could not open the microphone")
             return
         }
+        saveEdits()
+        currentNote = null
+        result.setText("")
         recordStart = SystemClock.elapsedRealtime()
+        liveSession = liveSwitch.isChecked
         setState(State.RECORDING)
         ui.post(tick)
+        val w = whisper
+        if (liveSession && w != null) {
+            val l = LiveTranscriber(w, recorder, threads, selectedLanguage()) { text ->
+                ui.post { if (live != null && state == State.RECORDING) showLive(text) }
+            }
+            live = l
+            scheduleLive(l)
+        }
+    }
+
+    private fun scheduleLive(l: LiveTranscriber) {
+        worker.execute {
+            if (!l.active) return@execute
+            l.step()
+            ui.postDelayed({ if (live === l && l.active) scheduleLive(l) }, LIVE_GAP_MS)
+        }
+    }
+
+    private fun showLive(text: String) {
+        result.setText(text)
+        result.setSelection(result.length())
+    }
+
+    private fun stopLive() {
+        live?.active = false
+        live = null
     }
 
     private val tick = object : Runnable {
@@ -158,6 +195,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopAndTranscribe() {
+        stopLive()
         val audio = recorder.stop()
         if (audio.size < Recorder.RATE / 2) {
             toast("Too short — hold on a little longer")
@@ -201,6 +239,8 @@ class MainActivity : AppCompatActivity() {
         progress.visibility = if (s == State.WORKING || s == State.LOADING) View.VISIBLE else View.GONE
         recordBtn.isEnabled = s == State.IDLE || s == State.RECORDING
         for (i in 0 until langGroup.childCount) langGroup.getChildAt(i).isEnabled = s == State.IDLE
+        liveSwitch.isEnabled = s == State.IDLE
+        result.isEnabled = s == State.IDLE
 
         val red = ContextCompat.getColor(this, R.color.record_red)
         val primary = ContextCompat.getColor(this, R.color.brand)
@@ -210,8 +250,11 @@ class MainActivity : AppCompatActivity() {
         when (s) {
             State.LOADING -> { status.text = "Loading speech engine…"; timer.text = "" }
             State.IDLE -> status.text = "Ready · works fully offline"
-            State.RECORDING -> status.text = "Listening…"
-            State.WORKING -> { status.text = "Writing your words…"; timer.text = "Please wait, this takes a few seconds" }
+            State.RECORDING -> status.text = if (liveSession) "Listening · live" else "Listening…"
+            State.WORKING -> {
+                status.text = if (liveSession) "Polishing the final text…" else "Writing your words…"
+                timer.text = "Please wait, this takes a few seconds"
+            }
             State.FAILED -> { status.text = "Speech engine failed to load"; timer.text = "Please reinstall the app" }
         }
         if (s == State.IDLE && timer.text.isNullOrEmpty()) timer.text = "Tap the mic and speak"
@@ -273,6 +316,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        stopLive()
         if (state == State.RECORDING) recorder.stop()
         worker.execute { whisper?.release() }
         worker.shutdown()
@@ -281,5 +325,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val MODEL_PATH = "models/ggml-base.bin"
         const val MAX_SECONDS = 600
+        const val LIVE_GAP_MS = 300L
     }
 }
