@@ -1,0 +1,65 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Get whisper.cpp (speech engine)
+        run: git clone --depth 1 --branch v1.9.5 https://github.com/ggml-org/whisper.cpp app/src/main/cpp/whisper.cpp
+
+      - name: Cache speech model
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/models
+          key: whisper-model-ggml-base-v1
+
+      - name: Download speech model (base, multilingual)
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p app/src/main/assets/models
+          curl -L --fail --retry 3 -o app/src/main/assets/models/ggml-base.bin \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+          ls -lh app/src/main/assets/models
+
+      - name: Build APK
+        run: gradle --no-daemon assembleRelease
+
+      - name: Rename APK
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk out/VoiceNotes.apk
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VoiceNotes-apk
+          path: out/VoiceNotes.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Voice Notes build ${{ github.run_number }}
+          body: Offline speech-to-text (English, বাংলা, हिंदी). Download VoiceNotes.apk below and install.
+          files: out/VoiceNotes.apk
+          make_latest: true
