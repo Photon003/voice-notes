@@ -134,12 +134,24 @@
         android:orientation="horizontal">
 
         <com.google.android.material.button.MaterialButton
+            android:id="@+id/readBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="6dp"
+            android:layout_weight="1.2"
+            android:paddingHorizontal="4dp"
+            android:text="Read"
+            app:icon="@drawable/ic_speaker"
+            app:iconPadding="4dp" />
+
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/copyBtn"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginEnd="6dp"
             android:layout_weight="1"
+            android:paddingHorizontal="4dp"
             android:text="Copy" />
 
         <com.google.android.material.button.MaterialButton
@@ -149,6 +161,7 @@
             android:layout_height="wrap_content"
             android:layout_marginEnd="6dp"
             android:layout_weight="1"
+            android:paddingHorizontal="4dp"
             android:text="Share" />
 
         <com.google.android.material.button.MaterialButton
@@ -157,6 +170,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:paddingHorizontal="4dp"
             android:text="New" />
     </LinearLayout>
 

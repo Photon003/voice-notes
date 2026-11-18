@@ -10,6 +10,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.view.View
 import android.view.WindowManager
 import android.widget.ArrayAdapter
@@ -45,6 +47,10 @@ class MainActivity : AppCompatActivity() {
     private var currentNote: Note? = null
     private var live: LiveTranscriber? = null
     private var liveSession = false
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+    private var speaking = false
+    private lateinit var readBtn: MaterialButton
 
     private lateinit var status: TextView
     private lateinit var timer: TextView
@@ -86,6 +92,17 @@ class MainActivity : AppCompatActivity() {
         liveSwitch.setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("live", on).apply() }
 
         recordBtn.setOnClickListener { onRecordTapped() }
+        readBtn = findViewById(R.id.readBtn)
+        readBtn.setOnClickListener { if (speaking) stopSpeaking() else readAloud() }
+        tts = TextToSpeech(this) { st ->
+            ttsReady = st == TextToSpeech.SUCCESS
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(id: String?) {}
+                override fun onDone(id: String?) { if (id == LAST_UTTERANCE) ui.post { setSpeaking(false) } }
+                @Deprecated("Deprecated in Java")
+                override fun onError(id: String?) { ui.post { setSpeaking(false) } }
+            })
+        }
         findViewById<MaterialButton>(R.id.copyBtn).setOnClickListener { copyText() }
         findViewById<MaterialButton>(R.id.shareBtn).setOnClickListener { shareText() }
         findViewById<MaterialButton>(R.id.clearBtn).setOnClickListener {
@@ -148,6 +165,7 @@ class MainActivity : AppCompatActivity() {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
             return
         }
+        stopSpeaking()
         if (!recorder.start()) {
             toast("Could not open the microphone")
             return
@@ -294,6 +312,87 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    // ---------- Read aloud ----------
+
+    private fun readAloud() {
+        val text = result.text.toString().trim()
+        if (text.isBlank()) return toast("Nothing to read yet")
+        val engine = tts
+        if (engine == null || !ttsReady) return toast("Voice engine is still starting, try again")
+
+        val locale = localeFor(text)
+        var r = engine.setLanguage(locale)
+        if (r < TextToSpeech.LANG_AVAILABLE && locale.language == "en") r = engine.setLanguage(Locale.US)
+        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+            val name = languageName(locale.language)
+            AlertDialog.Builder(this)
+                .setTitle("No $name voice on this phone")
+                .setMessage("Download the $name voice once (it then works offline). Open voice settings now?")
+                .setPositiveButton("Open") { _, _ ->
+                    try {
+                        startActivity(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA))
+                    } catch (e: Exception) {
+                        startActivity(Intent("com.android.settings.TTS_SETTINGS"))
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+
+        val parts = splitForSpeech(text, TextToSpeech.getMaxSpeechInputLength() - 100)
+        parts.forEachIndexed { i, part ->
+            val id = if (i == parts.lastIndex) LAST_UTTERANCE else "part$i"
+            engine.speak(part, if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, id)
+        }
+        setSpeaking(true)
+    }
+
+    private fun stopSpeaking() {
+        if (speaking) tts?.stop()
+        setSpeaking(false)
+    }
+
+    private fun setSpeaking(on: Boolean) {
+        speaking = on
+        readBtn.text = if (on) "Stop" else "Read"
+        readBtn.setIconResource(if (on) R.drawable.ic_stop else R.drawable.ic_speaker)
+    }
+
+    /** Picks the voice from the script the text is written in. */
+    private fun localeFor(text: String): Locale {
+        var bengali = 0
+        var devanagari = 0
+        var latin = 0
+        for (c in text) when (c) {
+            in 'ঀ'..'৿' -> bengali++
+            in 'ऀ'..'ॿ' -> devanagari++
+            in 'A'..'Z', in 'a'..'z' -> latin++
+        }
+        return when {
+            bengali > devanagari && bengali > latin -> Locale("bn", "IN")
+            devanagari > latin -> Locale("hi", "IN")
+            else -> Locale("en", "IN")
+        }
+    }
+
+    /** Splits long text at sentence ends so the voice engine accepts it. */
+    private fun splitForSpeech(text: String, max: Int): List<String> {
+        val out = ArrayList<String>()
+        val sb = StringBuilder()
+        for (sentence in text.split(Regex("(?<=[.!?।])\\s+"))) {
+            if (sb.length + sentence.length + 1 > max && sb.isNotEmpty()) {
+                out.add(sb.toString()); sb.clear()
+            }
+            var s = sentence
+            while (s.length > max) { out.add(s.take(max)); s = s.drop(max) }
+            if (sb.isNotEmpty()) sb.append(' ')
+            sb.append(s)
+        }
+        if (sb.isNotEmpty()) out.add(sb.toString())
+        return out
+    }
+
     private fun copyText() {
         val text = result.text.toString()
         if (text.isBlank()) return toast("Nothing to copy yet")
@@ -333,6 +432,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopLive()
+        tts?.stop()
+        tts?.shutdown()
         if (state == State.RECORDING) recorder.stop()
         worker.execute { models.releaseAll() }
         worker.shutdown()
@@ -341,5 +442,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val MAX_SECONDS = 600
         const val LIVE_GAP_MS = 300L
+        const val LAST_UTTERANCE = "last"
     }
 }

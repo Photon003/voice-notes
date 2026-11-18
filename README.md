@@ -7,6 +7,7 @@ Offline speech-to-text for Android. Speak, and it writes your words — no inter
   - Auto / English / Hindi: multilingual Whisper `base`
   - Bengali: [anuragshas/whisper-small-bn](https://huggingface.co/anuragshas/whisper-small-bn) (Whisper small fine-tuned on Bengali), converted to ggml q8_0 during the build
 - Live mode: words appear while you speak, then a careful final pass polishes them
+- Read button: reads the text back aloud with the phone's own voices (English, Bengali, Hindi)
 - Copy, share, edit, and a saved history — everything stays on the phone
 
 ## Install
